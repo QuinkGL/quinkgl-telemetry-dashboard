@@ -183,7 +183,8 @@ export function Documentation() {
               <h2 className="text-2xl text-[var(--text-primary)]">Telemetry</h2>
               <p className="text-[var(--text-secondary)] leading-relaxed">
                 The dashboard consumes a separate FastAPI telemetry service. Peers POST runtime events and heartbeats;
-                the React dashboard reads REST snapshots and subscribes to a WebSocket stream.
+                the React dashboard reads swarm-scoped REST snapshots and subscribes to a filtered WebSocket stream after
+                the operator enters a short-lived terminal code.
               </p>
               <div className="border border-[var(--border)] rounded overflow-hidden">
                 <table className="w-full">
@@ -201,6 +202,8 @@ export function Documentation() {
                       ["GET /api/rounds", "round summaries"],
                       ["GET /api/network/graph", "topology nodes and edges"],
                       ["GET /api/swarms", "manifest and swarm metadata"],
+                      ["POST /api/dashboard/codes", "authenticated terminal code creation"],
+                      ["POST /api/dashboard/login", "dashboard code exchange"],
                       ["POST /api/telemetry/events", "authenticated peer event ingest"],
                       ["POST /api/telemetry/heartbeats", "authenticated heartbeat ingest"],
                       ["WS /api/stream or /api/ws", "live dashboard updates"],
@@ -223,6 +226,13 @@ export function Documentation() {
 quinkgl run \\
   --manifest my-swarm.qgl \\
   --script peer_script.py`}
+              />
+              <TerminalBlock
+                label="dashboard login"
+                command={`# terminal output from quinkgl run
+Dashboard code: QGL-ABCD-1234
+
+# paste this code into /login to view only this swarm`}
               />
               <TerminalBlock
                 label="private qglkey"

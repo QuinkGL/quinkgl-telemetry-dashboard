@@ -1,17 +1,25 @@
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { Activity, Network, Boxes, Server, TrendingUp, LayoutGrid } from "lucide-react";
+import { Activity, Network, Boxes, Server, TrendingUp, LayoutGrid, LogOut } from "lucide-react";
 import { useEffect, useState } from "react";
 import { dashboardStore, useDashboardState } from "../../lib/dashboardState";
+import { clearViewerSession, getViewerScope } from "../../lib/dashboardAuth";
 import { relativeAge, statusTone } from "../lib/dashboardUi";
 
 function DashboardLayout() {
   const location = useLocation();
   const state = useDashboardState();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const viewerScope = getViewerScope();
 
   useEffect(() => {
     dashboardStore.start();
   }, []);
+
+  const logout = () => {
+    clearViewerSession();
+    dashboardStore.stop();
+    window.location.assign("/login");
+  };
 
   const navItems = [
     { path: "/dashboard", icon: LayoutGrid, label: "Overview", desc: "Session health" },
@@ -126,6 +134,10 @@ function DashboardLayout() {
 
           <div className="flex items-center gap-2">
             <div className="px-2.5 py-1 bg-[var(--surface)] border border-[var(--border)] rounded text-xs mono">
+              <span className="text-[var(--text-muted)]">swarm:</span>{" "}
+              <span className="text-[var(--text-secondary)]">{viewerScope?.swarm_id?.slice(0, 12) || "-"}</span>
+            </div>
+            <div className="px-2.5 py-1 bg-[var(--surface)] border border-[var(--border)] rounded text-xs mono">
               <span className="text-[var(--text-muted)]">socket:</span>{" "}
               <span className={connectionClass}>{state.connection.status}</span>
             </div>
@@ -133,6 +145,13 @@ function DashboardLayout() {
               <span className="text-[var(--text-muted)]">updated:</span>{" "}
               <span className="text-[var(--text-secondary)]">{relativeAge(state.session.lastUpdatedAt ?? state.connection.lastConnectedAt)}</span>
             </div>
+            <button
+              onClick={logout}
+              title="Log out"
+              className="w-7 h-7 flex items-center justify-center border border-[var(--border)] bg-[var(--surface)] rounded text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
         </header>
 

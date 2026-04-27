@@ -1,3 +1,5 @@
+import { getViewerToken } from './dashboardAuth.js'
+
 const DEFAULT_API_BASE = import.meta.env?.VITE_QUINKGL_DASHBOARD_API_BASE || '/api'
 
 function trimTrailingSlash(value) {
@@ -12,11 +14,36 @@ function joinUrl(base, path) {
   return `${trimTrailingSlash(base)}${path}`
 }
 
-async function readJson(url) {
+async function readJson(url, { token = null } = {}) {
+  const headers = {
+    Accept: 'application/json',
+  }
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
   const response = await fetch(url, {
-    headers: {
-      Accept: 'application/json',
-    },
+    headers,
+  })
+
+  if (!response.ok) {
+    throw new Error(`Request failed for ${url}`)
+  }
+
+  return response.json()
+}
+
+async function postJson(url, payload, { token = null } = {}) {
+  const headers = {
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  }
+  if (token) {
+    headers.Authorization = `Bearer ${token}`
+  }
+  const response = await fetch(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
   })
 
   if (!response.ok) {
@@ -283,13 +310,30 @@ function isMeaningful(value) {
   return true
 }
 
-export function createDashboardApi({ baseUrl = DEFAULT_API_BASE } = {}) {
+function addViewerTokenToSocketUrl(socketUrl, token) {
+  if (!socketUrl || typeof window === 'undefined') {
+    return socketUrl
+  }
+  const url = new URL(socketUrl, window.location.origin)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  if (token) {
+    url.searchParams.set('viewer_token', token)
+  }
+  return url.toString()
+}
+
+export function createDashboardApi({
+  baseUrl = DEFAULT_API_BASE,
+  tokenProvider = getViewerToken,
+} = {}) {
   const normalizedBaseUrl = trimTrailingSlash(baseUrl)
-  const socketUrl = joinUrl(normalizedBaseUrl, '/ws')
+  const rawSocketUrl = joinUrl(normalizedBaseUrl, '/ws')
+  const getToken = () => tokenProvider?.() ?? null
+  const getSocketUrl = () => addViewerTokenToSocketUrl(rawSocketUrl, getToken())
 
   const fetchJson = async (path, fallback) => {
     try {
-      return await readJson(joinUrl(normalizedBaseUrl, path))
+      return await readJson(joinUrl(normalizedBaseUrl, path), { token: getToken() })
     } catch {
       return fallback
     }
@@ -302,7 +346,10 @@ export function createDashboardApi({ baseUrl = DEFAULT_API_BASE } = {}) {
 
   return {
     baseUrl: normalizedBaseUrl,
-    socketUrl,
+    get socketUrl() {
+      return getSocketUrl()
+    },
+    loginDashboard: (code) => postJson(joinUrl(normalizedBaseUrl, '/dashboard/login'), { code }),
     fetchSession: () => fetchMaybe('/session', null),
     fetchNodes: () => fetchMaybe('/nodes', []),
     fetchNode: (nodeId) => fetchMaybe(`/nodes/${encodeURIComponent(nodeId)}`, null),
