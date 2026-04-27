@@ -1,4 +1,3 @@
-import { Download } from "lucide-react";
 import { getDashboardNodes, getDashboardSwarms, useDashboardState } from "../../../lib/dashboardState";
 import { formatNumber, formatShape } from "../../lib/dashboardUi";
 
@@ -32,14 +31,9 @@ export function Swarms() {
             {swarms.map((swarm) => (
               <div key={swarm.swarmId} className="bg-[var(--surface)] border border-[var(--border)] rounded p-5 space-y-4">
                 <div>
-                  <div className="flex items-start justify-between mb-2">
-                    <div>
-                      <h3 className="text-base text-[var(--text-primary)] mb-1">{swarm.swarmName || swarm.swarmId}</h3>
-                      <p className="text-sm text-[var(--text-secondary)]">{swarm.description || "Telemetry manifest metadata"}</p>
-                    </div>
-                    <button className="p-2 hover:bg-[var(--bg-elevated)] rounded transition-colors group" title="Manifest export is served by the telemetry API">
-                      <Download className="w-4 h-4 text-[var(--text-muted)] group-hover:text-[var(--gold-mid)]" />
-                    </button>
+                  <div className="mb-2">
+                    <h3 className="text-base text-[var(--text-primary)] mb-1">{swarm.swarmName || swarm.swarmId}</h3>
+                    <p className="text-sm text-[var(--text-secondary)]">{swarm.description || "Telemetry manifest metadata"}</p>
                   </div>
 
                   <div className="flex items-center gap-2 mt-3">

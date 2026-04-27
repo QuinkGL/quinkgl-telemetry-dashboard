@@ -1,5 +1,6 @@
 import { Eye } from "lucide-react";
-import { getDashboardEvents, getDashboardNodes, useDashboardState } from "../../../lib/dashboardState";
+import { useNavigate } from "react-router-dom";
+import { dashboardStore, getDashboardEvents, getDashboardNodes, useDashboardState } from "../../../lib/dashboardState";
 import {
   eventSummary,
   formatDecimal,
@@ -11,6 +12,7 @@ import {
 } from "../../lib/dashboardUi";
 
 export function Nodes() {
+  const navigate = useNavigate();
   const state = useDashboardState();
   const nodes = getDashboardNodes(state);
   const events = getDashboardEvents(state).slice(0, 6);
@@ -62,7 +64,13 @@ export function Nodes() {
                         </div>
                       </div>
                     </div>
-                    <button className="px-3 py-1.5 border border-[var(--border)] rounded text-xs text-[var(--text-secondary)] hover:border-[var(--gold-mid)] hover:text-[var(--gold-mid)] transition-colors flex items-center gap-1.5">
+                    <button
+                      onClick={() => {
+                        dashboardStore.selectNode(node.nodeId);
+                        navigate("/dashboard/topology");
+                      }}
+                      className="px-3 py-1.5 border border-[var(--border)] rounded text-xs text-[var(--text-secondary)] hover:border-[var(--gold-mid)] hover:text-[var(--gold-mid)] transition-colors flex items-center gap-1.5"
+                    >
                       <Eye className="w-3 h-3" />
                       Inspect
                     </button>

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ZoomIn, ZoomOut, Maximize2, RotateCcw } from "lucide-react";
 import {
+  dashboardStore,
   getDashboardNodes,
   getDashboardSwarms,
   useDashboardState,
@@ -15,8 +16,10 @@ import {
 } from "../../lib/dashboardUi";
 
 const WIDTH = 1100;
-const HEIGHT = 680;
+const HEIGHT = 600;
 const SWARM_COLORS = ["#F5C86B", "#7CC4FF", "#C28BFF", "#4ADE80", "#F87171"];
+const NODE_SPACING = 72;
+const MIN_NODE_DISTANCE = 54;
 
 function projectGraphNode(node, index, total) {
   const rawX = Number(node?.x);
@@ -35,6 +38,60 @@ function projectGraphNode(node, index, total) {
     x: WIDTH / 2 + Math.cos(angle) * 260,
     y: HEIGHT / 2 + Math.sin(angle) * 190,
   };
+}
+
+function distributeOverlappingNodes(nodes) {
+  const groups = new Map();
+
+  nodes.forEach((node, index) => {
+    const key = `${Math.round(node.x / 18)}:${Math.round(node.y / 18)}:${node.swarmId || node.swarmName || "default"}`;
+    const group = groups.get(key) || [];
+    group.push({ node, index });
+    groups.set(key, group);
+  });
+
+  const spreadNodes = nodes.map((node) => ({ ...node }));
+
+  groups.forEach((group) => {
+    if (group.length < 2) return;
+
+    const centerX = group.reduce((sum, item) => sum + item.node.x, 0) / group.length;
+    const centerY = group.reduce((sum, item) => sum + item.node.y, 0) / group.length;
+    const radius = Math.max(NODE_SPACING, (group.length * NODE_SPACING) / (Math.PI * 2));
+
+    group.forEach((item, offset) => {
+      const angle = (-Math.PI / 2) + (Math.PI * 2 * offset) / group.length;
+      spreadNodes[item.index] = {
+        ...spreadNodes[item.index],
+        x: Math.max(90, Math.min(WIDTH - 90, centerX + Math.cos(angle) * radius)),
+        y: Math.max(90, Math.min(HEIGHT - 90, centerY + Math.sin(angle) * radius)),
+      };
+    });
+  });
+
+  for (let pass = 0; pass < 5; pass += 1) {
+    for (let i = 0; i < spreadNodes.length; i += 1) {
+      for (let j = i + 1; j < spreadNodes.length; j += 1) {
+        const a = spreadNodes[i];
+        const b = spreadNodes[j];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const distance = Math.hypot(dx, dy) || 1;
+        if (distance >= MIN_NODE_DISTANCE) continue;
+
+        const push = (MIN_NODE_DISTANCE - distance) / 2;
+        const ux = dx / distance;
+        const uy = dy / distance;
+
+        a.x = Math.max(80, Math.min(WIDTH - 80, a.x - ux * push));
+        a.y = Math.max(80, Math.min(HEIGHT - 80, a.y - uy * push));
+        b.x = Math.max(80, Math.min(WIDTH - 80, b.x + ux * push));
+        b.y = Math.max(80, Math.min(HEIGHT - 80, b.y + uy * push));
+      }
+    }
+  }
+
+  return spreadNodes;
 }
 
 function buildSwarmMeta(nodes, swarms) {
@@ -58,8 +115,12 @@ export function Topology() {
   const nodes = getDashboardNodes(state);
   const swarms = getDashboardSwarms(state);
   const [zoom, setZoom] = useState(1);
-  const [selectedNode, setSelectedNode] = useState(null);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [canvasSize, setCanvasSize] = useState({ width: WIDTH, height: HEIGHT, dpr: 1 });
+  const graphFrameRef = useRef(null);
   const canvasRef = useRef(null);
+  const dragRef = useRef(null);
   const transfersRef = useRef([]);
   const animationRef = useRef(0);
 
@@ -67,13 +128,15 @@ export function Topology() {
   const swarmById = useMemo(() => new Map(swarmMeta.map((swarm) => [swarm.id, swarm])), [swarmMeta]);
   const graphNodes = useMemo(() => {
     const graphNodeById = new Map(state.network.nodes.map((node) => [node.id, node]));
-    return nodes.map((node, index) => ({
+    const projectedNodes = nodes.map((node, index) => ({
       ...node,
       ...projectGraphNode(graphNodeById.get(node.nodeId), index, nodes.length),
     }));
+    return distributeOverlappingNodes(projectedNodes);
   }, [nodes, state.network.nodes]);
   const nodeById = useMemo(() => new Map(graphNodes.map((node) => [node.nodeId, node])), [graphNodes]);
   const graphEdges = useMemo(() => state.network.edges.filter((edge) => nodeById.has(edge.source) && nodeById.has(edge.target)), [state.network.edges, nodeById]);
+  const selectedNode = state.selectedNodeId;
 
   const onlineCount = nodes.filter((node) => node.running).length;
   const offlineCount = nodes.filter((node) => !node.running || node.status === "offline").length;
@@ -98,6 +161,27 @@ export function Topology() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
+
+    const resize = () => {
+      const rect = canvas.getBoundingClientRect();
+      const width = Math.max(360, Math.round(rect.width));
+      const height = Math.max(320, Math.round(rect.height));
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      canvas.width = Math.round(width * dpr);
+      canvas.height = Math.round(height * dpr);
+      setCanvasSize({ width, height, dpr });
+    };
+
+    resize();
+    const observer = new ResizeObserver(resize);
+    observer.observe(canvas);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
@@ -107,11 +191,12 @@ export function Topology() {
     };
 
     const draw = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.setTransform(canvasSize.dpr, 0, 0, canvasSize.dpr, 0, 0);
+      ctx.clearRect(0, 0, canvasSize.width, canvasSize.height);
       ctx.save();
-      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.translate(canvasSize.width / 2 + pan.x, canvasSize.height / 2 + pan.y);
       ctx.scale(zoom, zoom);
-      ctx.translate(-canvas.width / 2, -canvas.height / 2);
+      ctx.translate(-WIDTH / 2, -HEIGHT / 2);
 
       swarmMeta.forEach((swarm) => {
         const swarmNodes = graphNodes.filter((node) => (node.swarmId || node.swarmName) === swarm.id);
@@ -219,7 +304,7 @@ export function Topology() {
         ctx.fillStyle = "#6B5F50";
         ctx.font = "14px sans-serif";
         ctx.textAlign = "center";
-        ctx.fillText("Waiting for topology telemetry", canvas.width / 2, canvas.height / 2);
+        ctx.fillText("Waiting for topology telemetry", WIDTH / 2, HEIGHT / 2);
       }
 
       ctx.restore();
@@ -228,20 +313,71 @@ export function Topology() {
 
     draw();
     return () => cancelAnimationFrame(animationRef.current);
-  }, [graphNodes, graphEdges, nodeById, selectedNode, swarmById, swarmMeta, zoom]);
+  }, [canvasSize, graphNodes, graphEdges, nodeById, pan, selectedNode, swarmById, swarmMeta, zoom]);
 
-  const handleCanvasClick = (event) => {
+  const eventToGraphPoint = (event) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    const cx = (event.clientX - rect.left) * scaleX;
-    const cy = (event.clientY - rect.top) * scaleY;
-    const x = (cx - canvas.width / 2) / zoom + canvas.width / 2;
-    const y = (cy - canvas.height / 2) / zoom + canvas.height / 2;
-    const clicked = graphNodes.find((node) => Math.hypot(x - node.x, y - node.y) < 14);
-    setSelectedNode(clicked ? clicked.nodeId : null);
+    const cx = event.clientX - rect.left;
+    const cy = event.clientY - rect.top;
+    return {
+      x: (cx - canvasSize.width / 2 - pan.x) / zoom + WIDTH / 2,
+      y: (cy - canvasSize.height / 2 - pan.y) / zoom + HEIGHT / 2,
+    };
+  };
+
+  const handlePointerDown = (event) => {
+    if (event.button !== 0) return;
+    dragRef.current = {
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startPanX: pan.x,
+      startPanY: pan.y,
+      moved: false,
+    };
+    setIsDragging(true);
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handlePointerMove = (event) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+
+    const dx = event.clientX - drag.startClientX;
+    const dy = event.clientY - drag.startClientY;
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) drag.moved = true;
+    setPan({ x: drag.startPanX + dx, y: drag.startPanY + dy });
+  };
+
+  const handlePointerUp = (event) => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    setIsDragging(false);
+
+    if (drag?.moved) return;
+    const point = eventToGraphPoint(event);
+    if (!point) return;
+
+    const clicked = graphNodes.find((node) => Math.hypot(point.x - node.x, point.y - node.y) < 18);
+    dashboardStore.selectNode(clicked ? clicked.nodeId : null);
+  };
+
+  const resetView = () => {
+    setZoom(1);
+    setPan({ x: 0, y: 0 });
+  };
+
+  const toggleFullscreen = async () => {
+    const frame = graphFrameRef.current;
+    if (!frame) return;
+
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    await frame.requestFullscreen();
   };
 
   const selectedNodeData = selectedNode ? nodeById.get(selectedNode) : null;
@@ -262,22 +398,29 @@ export function Topology() {
         </div>
       </div>
 
-      <div className="flex-1 p-6 pt-4 relative">
-        <div className="h-full bg-[var(--surface)] border border-[var(--border)] rounded relative overflow-hidden">
-          <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} className="w-full h-full cursor-pointer" onClick={handleCanvasClick} />
+      <div className="flex-1 min-h-0 p-4 relative">
+        <div ref={graphFrameRef} className="h-full min-h-[420px] bg-[var(--surface)] border border-[var(--border)] rounded relative overflow-hidden fullscreen:bg-[var(--surface)]">
+          <canvas
+            ref={canvasRef}
+            className={`w-full h-full touch-none select-none ${isDragging ? "cursor-grabbing" : "cursor-grab"}`}
+            onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
+            onPointerUp={handlePointerUp}
+            onPointerCancel={handlePointerUp}
+          />
 
           <div className="absolute top-4 right-4 flex items-center gap-2 bg-[var(--bg-elevated)]/95 border border-[var(--border)] rounded p-1.5">
             <button onClick={() => setZoom(Math.max(zoom - 0.2, 0.5))} className="p-1.5 hover:bg-[var(--surface)] rounded transition-colors" title="Zoom out">
               <ZoomOut className="w-4 h-4 text-[var(--text-secondary)]" />
             </button>
-            <button onClick={() => setZoom(1)} className="p-1.5 hover:bg-[var(--surface)] rounded transition-colors" title="Fit to view">
+            <button onClick={toggleFullscreen} className="p-1.5 hover:bg-[var(--surface)] rounded transition-colors" title="Fullscreen">
               <Maximize2 className="w-4 h-4 text-[var(--text-secondary)]" />
             </button>
             <button onClick={() => setZoom(Math.min(zoom + 0.2, 3))} className="p-1.5 hover:bg-[var(--surface)] rounded transition-colors" title="Zoom in">
               <ZoomIn className="w-4 h-4 text-[var(--text-secondary)]" />
             </button>
             <div className="w-px h-4 bg-[var(--border)]" />
-            <button onClick={() => setZoom(1)} className="p-1.5 hover:bg-[var(--surface)] rounded transition-colors" title="Reset view">
+            <button onClick={resetView} className="p-1.5 hover:bg-[var(--surface)] rounded transition-colors" title="Reset view">
               <RotateCcw className="w-4 h-4 text-[var(--text-secondary)]" />
             </button>
             <div className="px-2 text-xs text-[var(--text-muted)] mono">{Math.round(zoom * 100)}%</div>
