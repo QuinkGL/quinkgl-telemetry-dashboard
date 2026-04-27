@@ -1,5 +1,6 @@
-import { Link } from "react-router-dom";
-import { GossipBackground } from "../components/GossipBackground";
+import { Link } from 'react-router-dom';
+import { GossipBackground } from '../components/GossipBackground';
+
 function Home() {
   return <div className="h-full relative overflow-hidden">
       <GossipBackground />
@@ -7,20 +8,20 @@ function Home() {
       <div className="relative z-10 h-full flex flex-col items-center justify-center gap-8">
         <div className="text-center space-y-3 px-6 py-4">
           <h1
-    className="text-5xl text-[var(--gold-light)] tracking-tight"
-    style={{ textShadow: "0 2px 20px rgba(0,0,0,0.9), 0 0 40px rgba(0,0,0,0.7)" }}
+    className="text-6xl text-[var(--gold-light)] tracking-tight"
+    style={{ textShadow: '0 2px 24px rgba(0,0,0,1), 0 0 48px rgba(0,0,0,0.95), 0 0 80px rgba(0,0,0,0.7)' }}
   >
             QuinkGL
           </h1>
           <p
-    className="text-lg text-white"
-    style={{ textShadow: "0 2px 12px rgba(0,0,0,0.95), 0 0 24px rgba(0,0,0,0.8)" }}
+    className="text-xl text-white"
+    style={{ textShadow: '0 2px 16px rgba(0,0,0,1), 0 0 32px rgba(0,0,0,0.9)' }}
   >
             Decentralized Gossip Learning Framework
           </p>
           <p
-    className="text-sm text-white/85 max-w-md mx-auto leading-relaxed"
-    style={{ textShadow: "0 2px 10px rgba(0,0,0,0.95), 0 0 20px rgba(0,0,0,0.8)" }}
+    className="text-base text-white max-w-lg mx-auto leading-relaxed"
+    style={{ textShadow: '0 2px 14px rgba(0,0,0,1), 0 0 28px rgba(0,0,0,0.9)' }}
   >
             Train machine learning models across distributed peers without central coordination
           </p>
