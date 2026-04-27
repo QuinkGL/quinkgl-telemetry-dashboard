@@ -1,0 +1,332 @@
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ZoomIn, ZoomOut, Maximize2, RotateCcw } from "lucide-react";
+import {
+  getDashboardNodes,
+  getDashboardSwarms,
+  useDashboardState,
+} from "../../../lib/dashboardState";
+import {
+  formatDecimal,
+  formatNumber,
+  formatPercent,
+  nodeDisplayStatus,
+  relativeAge,
+  statusTone,
+} from "../../lib/dashboardUi";
+
+const WIDTH = 1100;
+const HEIGHT = 680;
+const SWARM_COLORS = ["#F5C86B", "#7CC4FF", "#C28BFF", "#4ADE80", "#F87171"];
+
+function projectGraphNode(node, index, total) {
+  const rawX = Number(node?.x);
+  const rawY = Number(node?.y);
+  if (Number.isFinite(rawX) && Number.isFinite(rawY)) {
+    const normalizedX = rawX <= 100 ? rawX / 100 : rawX / WIDTH;
+    const normalizedY = rawY <= 100 ? rawY / 100 : rawY / HEIGHT;
+    return {
+      x: Math.max(80, Math.min(WIDTH - 80, normalizedX * WIDTH)),
+      y: Math.max(80, Math.min(HEIGHT - 80, normalizedY * HEIGHT)),
+    };
+  }
+
+  const angle = (Math.PI * 2 * index) / Math.max(1, total);
+  return {
+    x: WIDTH / 2 + Math.cos(angle) * 260,
+    y: HEIGHT / 2 + Math.sin(angle) * 190,
+  };
+}
+
+function buildSwarmMeta(nodes, swarms) {
+  const ids = Array.from(new Set([
+    ...swarms.map((swarm) => swarm.swarmId).filter(Boolean),
+    ...nodes.map((node) => node.swarmId || node.swarmName).filter(Boolean),
+  ]));
+
+  return ids.map((id, index) => {
+    const swarm = swarms.find((item) => item.swarmId === id);
+    return {
+      id,
+      label: swarm?.swarmName || id,
+      color: SWARM_COLORS[index % SWARM_COLORS.length],
+    };
+  });
+}
+
+export function Topology() {
+  const state = useDashboardState();
+  const nodes = getDashboardNodes(state);
+  const swarms = getDashboardSwarms(state);
+  const [zoom, setZoom] = useState(1);
+  const [selectedNode, setSelectedNode] = useState(null);
+  const canvasRef = useRef(null);
+  const transfersRef = useRef([]);
+  const animationRef = useRef(0);
+
+  const swarmMeta = useMemo(() => buildSwarmMeta(nodes, swarms), [nodes, swarms]);
+  const swarmById = useMemo(() => new Map(swarmMeta.map((swarm) => [swarm.id, swarm])), [swarmMeta]);
+  const graphNodes = useMemo(() => {
+    const graphNodeById = new Map(state.network.nodes.map((node) => [node.id, node]));
+    return nodes.map((node, index) => ({
+      ...node,
+      ...projectGraphNode(graphNodeById.get(node.nodeId), index, nodes.length),
+    }));
+  }, [nodes, state.network.nodes]);
+  const nodeById = useMemo(() => new Map(graphNodes.map((node) => [node.nodeId, node])), [graphNodes]);
+  const graphEdges = useMemo(() => state.network.edges.filter((edge) => nodeById.has(edge.source) && nodeById.has(edge.target)), [state.network.edges, nodeById]);
+
+  const onlineCount = nodes.filter((node) => node.running).length;
+  const offlineCount = nodes.filter((node) => !node.running || node.status === "offline").length;
+  const staleCount = nodes.filter((node) => node.status === "offline").length;
+  const metrics = [
+    { label: "Socket", value: state.connection.status, status: statusTone(state.connection.status) },
+    { label: "Online nodes", value: formatNumber(onlineCount), status: "normal" },
+    { label: "Offline nodes", value: formatNumber(offlineCount), status: offlineCount ? "warning" : "normal" },
+    { label: "Stale nodes", value: formatNumber(staleCount), status: staleCount ? "warning" : "normal" },
+    { label: "Active edges", value: formatNumber(graphEdges.length), status: "normal" },
+    { label: "Last update", value: relativeAge(state.session.lastUpdatedAt ?? state.connection.lastConnectedAt), status: statusTone(state.connection.status) },
+  ];
+
+  useEffect(() => {
+    transfersRef.current = graphEdges.flatMap((edge, index) => (
+      edge.edgeType === "model_transfer" || edge.exchangeCount
+        ? [{ edgeIndex: index, progress: Math.random(), speed: 0.003 + Math.random() * 0.005, direction: Math.random() < 0.5 ? 1 : -1 }]
+        : []
+    ));
+  }, [graphEdges]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const hexToRgb = (hex) => {
+      const v = hex.replace("#", "");
+      return { r: parseInt(v.slice(0, 2), 16), g: parseInt(v.slice(2, 4), 16), b: parseInt(v.slice(4, 6), 16) };
+    };
+
+    const draw = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.save();
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.scale(zoom, zoom);
+      ctx.translate(-canvas.width / 2, -canvas.height / 2);
+
+      swarmMeta.forEach((swarm) => {
+        const swarmNodes = graphNodes.filter((node) => (node.swarmId || node.swarmName) === swarm.id);
+        if (!swarmNodes.length) return;
+        const cx = swarmNodes.reduce((sum, node) => sum + node.x, 0) / swarmNodes.length;
+        const cy = swarmNodes.reduce((sum, node) => sum + node.y, 0) / swarmNodes.length;
+        const radius = Math.max(95, Math.max(...swarmNodes.map((node) => Math.hypot(node.x - cx, node.y - cy))) + 70);
+        const c = hexToRgb(swarm.color);
+        const grad = ctx.createRadialGradient(cx, cy, radius * 0.2, cx, cy, radius);
+        grad.addColorStop(0, `rgba(${c.r}, ${c.g}, ${c.b}, 0.14)`);
+        grad.addColorStop(0.6, `rgba(${c.r}, ${c.g}, ${c.b}, 0.05)`);
+        grad.addColorStop(1, `rgba(${c.r}, ${c.g}, ${c.b}, 0)`);
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, 0.35)`;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = `rgba(${c.r}, ${c.g}, ${c.b}, 0.85)`;
+        ctx.font = "11px monospace";
+        ctx.fillText(swarm.label.toUpperCase(), cx - radius + 6, cy - radius + 14);
+      });
+
+      graphEdges.forEach((edge) => {
+        const a = nodeById.get(edge.source);
+        const b = nodeById.get(edge.target);
+        if (!a || !b) return;
+        const swarm = swarmById.get(a.swarmId || a.swarmName);
+        const c = hexToRgb(swarm?.color || "#F5C86B");
+        ctx.beginPath();
+        ctx.moveTo(a.x, a.y);
+        ctx.lineTo(b.x, b.y);
+        ctx.strokeStyle = edge.edgeType === "model_transfer" ? `rgba(${c.r}, ${c.g}, ${c.b}, 0.55)` : "rgba(180, 180, 180, 0.18)";
+        ctx.lineWidth = edge.edgeType === "model_transfer" ? 1.5 : 1;
+        if (edge.edgeType !== "model_transfer") ctx.setLineDash([3, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      });
+
+      transfersRef.current.forEach((transfer) => {
+        const edge = graphEdges[transfer.edgeIndex];
+        const a = nodeById.get(edge?.source);
+        const b = nodeById.get(edge?.target);
+        if (!a || !b) return;
+        transfer.progress += transfer.speed;
+        if (transfer.progress >= 1) {
+          transfer.progress = 0;
+          transfer.direction = Math.random() < 0.5 ? 1 : -1;
+        }
+        const t = transfer.direction === 1 ? transfer.progress : 1 - transfer.progress;
+        const x = a.x + (b.x - a.x) * t;
+        const y = a.y + (b.y - a.y) * t;
+        const glow = ctx.createRadialGradient(x, y, 0, x, y, 10);
+        glow.addColorStop(0, "rgba(255, 245, 220, 0.9)");
+        glow.addColorStop(1, "rgba(255, 245, 220, 0)");
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(x, y, 10, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255, 245, 220, 0.95)";
+        ctx.beginPath();
+        ctx.arc(x, y, 2, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      const time = performance.now() / 600;
+      graphNodes.forEach((node) => {
+        const status = nodeDisplayStatus(node);
+        const tone = statusTone(status);
+        const swarm = swarmById.get(node.swarmId || node.swarmName);
+        const c = hexToRgb(swarm?.color || "#F5C86B");
+        const isSelected = selectedNode === node.nodeId;
+        const radius = isSelected ? 11 : 7;
+        if (tone === "success") {
+          const pulse = (Math.sin(time + node.x * 0.01) + 1) / 2;
+          ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, ${0.35 - pulse * 0.25})`;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(node.x, node.y, radius + 6 + pulse * 4, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius + 2, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${c.r}, ${c.g}, ${c.b}, 0.25)`;
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
+        ctx.fillStyle = tone === "success" ? "#4ADE80" : tone === "danger" ? "#F87171" : "#FBBF24";
+        ctx.fill();
+        ctx.strokeStyle = `rgba(${c.r}, ${c.g}, ${c.b}, 0.95)`;
+        ctx.lineWidth = isSelected ? 2.5 : 1.5;
+        ctx.stroke();
+        ctx.fillStyle = "#F2EDE4";
+        ctx.font = "10px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(node.nodeId, node.x, node.y - radius - 6);
+      });
+
+      if (!graphNodes.length) {
+        ctx.fillStyle = "#6B5F50";
+        ctx.font = "14px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Waiting for topology telemetry", canvas.width / 2, canvas.height / 2);
+      }
+
+      ctx.restore();
+      animationRef.current = requestAnimationFrame(draw);
+    };
+
+    draw();
+    return () => cancelAnimationFrame(animationRef.current);
+  }, [graphNodes, graphEdges, nodeById, selectedNode, swarmById, swarmMeta, zoom]);
+
+  const handleCanvasClick = (event) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const cx = (event.clientX - rect.left) * scaleX;
+    const cy = (event.clientY - rect.top) * scaleY;
+    const x = (cx - canvas.width / 2) / zoom + canvas.width / 2;
+    const y = (cy - canvas.height / 2) / zoom + canvas.height / 2;
+    const clicked = graphNodes.find((node) => Math.hypot(x - node.x, y - node.y) < 14);
+    setSelectedNode(clicked ? clicked.nodeId : null);
+  };
+
+  const selectedNodeData = selectedNode ? nodeById.get(selectedNode) : null;
+  const selectedSwarm = selectedNodeData ? swarmById.get(selectedNodeData.swarmId || selectedNodeData.swarmName) : null;
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="p-6 pb-0">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+          {metrics.map((metric) => (
+            <div key={metric.label} className="bg-[var(--surface)] border border-[var(--border)] rounded p-3">
+              <div className="text-xs text-[var(--text-muted)] mb-1">{metric.label}</div>
+              <div className={`text-sm mono ${metric.status === "success" ? "text-[var(--success)]" : metric.status === "warning" ? "text-[var(--warning)]" : metric.status === "danger" ? "text-[var(--danger)]" : "text-[var(--text-primary)]"}`}>
+                {metric.value}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 p-6 pt-4 relative">
+        <div className="h-full bg-[var(--surface)] border border-[var(--border)] rounded relative overflow-hidden">
+          <canvas ref={canvasRef} width={WIDTH} height={HEIGHT} className="w-full h-full cursor-pointer" onClick={handleCanvasClick} />
+
+          <div className="absolute top-4 right-4 flex items-center gap-2 bg-[var(--bg-elevated)]/95 border border-[var(--border)] rounded p-1.5">
+            <button onClick={() => setZoom(Math.max(zoom - 0.2, 0.5))} className="p-1.5 hover:bg-[var(--surface)] rounded transition-colors" title="Zoom out">
+              <ZoomOut className="w-4 h-4 text-[var(--text-secondary)]" />
+            </button>
+            <button onClick={() => setZoom(1)} className="p-1.5 hover:bg-[var(--surface)] rounded transition-colors" title="Fit to view">
+              <Maximize2 className="w-4 h-4 text-[var(--text-secondary)]" />
+            </button>
+            <button onClick={() => setZoom(Math.min(zoom + 0.2, 3))} className="p-1.5 hover:bg-[var(--surface)] rounded transition-colors" title="Zoom in">
+              <ZoomIn className="w-4 h-4 text-[var(--text-secondary)]" />
+            </button>
+            <div className="w-px h-4 bg-[var(--border)]" />
+            <button onClick={() => setZoom(1)} className="p-1.5 hover:bg-[var(--surface)] rounded transition-colors" title="Reset view">
+              <RotateCcw className="w-4 h-4 text-[var(--text-secondary)]" />
+            </button>
+            <div className="px-2 text-xs text-[var(--text-muted)] mono">{Math.round(zoom * 100)}%</div>
+          </div>
+
+          <div className="absolute top-4 left-4 bg-[var(--bg-elevated)]/95 border border-[var(--border)] rounded p-3 space-y-1.5">
+            <div className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">Swarms</div>
+            {swarmMeta.length ? swarmMeta.map((swarm) => {
+              const count = graphNodes.filter((node) => (node.swarmId || node.swarmName) === swarm.id).length;
+              return (
+                <div key={swarm.id} className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full" style={{ background: swarm.color }} />
+                  <span className="text-xs text-[var(--text-secondary)] mono">{swarm.label}</span>
+                  <span className="text-xs text-[var(--text-muted)] mono ml-auto">{count}</span>
+                </div>
+              );
+            }) : <div className="text-xs text-[var(--text-muted)]">No swarms</div>}
+          </div>
+
+          <div className="absolute bottom-4 left-4 bg-[var(--bg-elevated)]/95 border border-[var(--border)] rounded p-3 space-y-2">
+            <div className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-1">Legend</div>
+            <div className="flex items-center gap-2"><div className="w-3 h-0.5 bg-[var(--gold-mid)]/60" /><span className="text-xs text-[var(--text-secondary)]">Peer link</span></div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-white animate-pulse" /><span className="text-xs text-[var(--text-secondary)]">Live transfer</span></div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-[var(--success)]" /><span className="text-xs text-[var(--text-secondary)]">Online</span></div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-[var(--warning)]" /><span className="text-xs text-[var(--text-secondary)]">Idle</span></div>
+            <div className="flex items-center gap-2"><div className="w-2 h-2 rounded-full bg-[var(--danger)]" /><span className="text-xs text-[var(--text-secondary)]">Offline</span></div>
+          </div>
+
+          {selectedNodeData && (
+            <div className="hidden xl:block absolute bottom-4 right-4 w-72 bg-[var(--bg-elevated)]/95 border border-[var(--border)] rounded p-4 space-y-3">
+              <div>
+                <div className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-2">Selected Node</div>
+                <div className="text-sm text-[var(--text-primary)] mono mb-1">{selectedNodeData.nodeId}</div>
+                <div className="flex items-center gap-2">
+                  <span className={`w-1.5 h-1.5 rounded-full ${statusTone(nodeDisplayStatus(selectedNodeData)) === "success" ? "bg-[var(--success)]" : statusTone(nodeDisplayStatus(selectedNodeData)) === "danger" ? "bg-[var(--danger)]" : "bg-[var(--warning)]"}`} />
+                  <span className="text-xs text-[var(--text-secondary)]">{nodeDisplayStatus(selectedNodeData)}</span>
+                  {selectedSwarm && <><span className="text-[var(--text-muted)]">·</span><span className="w-2 h-2 rounded-full" style={{ background: selectedSwarm.color }} /><span className="text-xs text-[var(--text-secondary)] mono">{selectedSwarm.label}</span></>}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div><div className="text-xs text-[var(--text-muted)] mb-0.5">Round</div><div className="text-xs text-[var(--text-primary)] mono">{formatNumber(selectedNodeData.currentRound)}</div></div>
+                <div><div className="text-xs text-[var(--text-muted)] mb-0.5">Peers</div><div className="text-xs text-[var(--text-primary)] mono">{formatNumber(selectedNodeData.knownPeerCount)}</div></div>
+                <div><div className="text-xs text-[var(--text-muted)] mb-0.5">Accuracy</div><div className="text-xs text-[var(--success)] mono">{formatPercent(selectedNodeData.lastAccuracy)}</div></div>
+                <div><div className="text-xs text-[var(--text-muted)] mb-0.5">Loss</div><div className="text-xs text-[var(--text-primary)] mono">{formatDecimal(selectedNodeData.lastLoss)}</div></div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
