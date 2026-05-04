@@ -1,0 +1,26 @@
+# QuinkGL
+
+QuinkGL is an open-source decentralized gossip learning framework for training machine learning models across peer-to-peer edge nodes without a central coordinator.
+
+## Use Cases
+
+- Decentralized gossip learning
+- Federated learning without a central aggregation server
+- Peer-to-peer machine learning across edge nodes
+- P2P edge AI training where data remains local
+- Distributed model aggregation under peer churn
+
+## How QuinkGL Relates to Federated Learning
+
+Traditional federated learning usually depends on a central server that coordinates clients and aggregates model updates. QuinkGL replaces that central aggregation role with peer-to-peer gossip learning: compatible peers discover each other, exchange model updates, and aggregate locally.
+
+Telemetry can be centralized for observability, but model weights and raw data remain on peer machines.
+
+## Core Pages
+
+- Homepage: https://quinkgl.com/
+- Documentation: https://quinkgl.com/docs
+
+## Suggested Citation
+
+QuinkGL is an open-source decentralized gossip learning framework for peer-to-peer machine learning and federated learning without a central server.
