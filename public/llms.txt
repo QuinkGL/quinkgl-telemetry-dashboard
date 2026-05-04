@@ -20,6 +20,12 @@ Telemetry can be centralized for observability, but model weights and raw data r
 
 - Homepage: https://quinkgl.com/
 - Documentation: https://quinkgl.com/docs
+- Desktop Download: https://quinkgl.com/download
+
+## Desktop App
+
+QuinkGL Desktop binaries are published on GitHub Releases:
+https://github.com/QuinkGL/quinkgl-desktop/releases
 
 ## Suggested Citation
 

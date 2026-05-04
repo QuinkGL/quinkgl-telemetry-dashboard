@@ -43,7 +43,7 @@ export function Documentation() {
   const [activeSection, setActiveSection] = useState("concept");
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)]">
+    <div className="flex h-full">
       <aside className="w-60 border-r border-[var(--border)] bg-[var(--bg-elevated)] overflow-y-auto">
         <div className="p-6 border-b border-[var(--border)]">
           <div className="text-xs text-[var(--text-muted)] uppercase tracking-wider mb-2">Documentation</div>

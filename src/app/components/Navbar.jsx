@@ -32,6 +32,14 @@ function Navbar() {
         </Link>
 
         <Link
+    to="/download"
+    className={`px-4 py-2 text-sm transition-colors relative ${isActive("/download") ? "text-[var(--gold-mid)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}
+  >
+          Download
+          {isActive("/download") && <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-[var(--gold-mid)]" />}
+        </Link>
+
+        <Link
     to="/dashboard"
     className={`px-4 py-2 text-sm transition-colors relative ${isActive("/dashboard") ? "text-[var(--gold-mid)]" : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]"}`}
   >
